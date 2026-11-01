@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plan Ahead — Two-Sided Bargaining & Escrow Marketplace POC</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    .high-contrast { background-color: #000 !important; color: #FFFF00 !important; font-size: 1.15rem !important; }
+    .high-contrast .card { background-color: #111 !important; border: 2px solid #FFFF00 !important; color: #FFF !important; }
+  </style>
+</head>
+<body id="appBody" class="bg-slate-50 text-slate-900 min-h-screen p-4 md:p-6 transition-all">
+
+  <header class="max-w-7xl mx-auto flex flex-wrap justify-between items-center bg-white card p-4 rounded-xl shadow mb-6 gap-3">
+    <div>
+      <h1 class="text-2xl font-extrabold text-indigo-700">Plan Ahead Marketplace POC</h1>
+      <p class="text-sm text-slate-600">Direct User-Worker Price Bargaining • Transparent Flat Fee • Escrow Trust</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <button onclick="speakGuide()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-indigo-700">
+        🔊 Listen to Guide
+      </button>
+      <button onclick="toggleContrast()" class="bg-slate-800 text-white px-4 py-2 rounded-lg font-bold">
+        👁️ Senior High-Contrast & Large Font
+      </button>
+      <button onclick="triggerSOS()" class="bg-red-600 text-white px-4 py-2 rounded-lg font-extrabold animate-pulse">
+        🚨 Emergency SOS
+      </button>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <section class="bg-white card p-5 rounded-xl shadow space-y-4">
+      <h2 class="text-xl font-bold border-b pb-2">1. User Dashboard: Post a Job</h2>
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <button onclick="selectCategory('WRENCH', 'Plumbing / Repair')" class="p-3 border rounded-lg hover:bg-indigo-50 font-semibold">🔧 Wrench</button>
+        <button onclick="selectCategory('BROOM', 'Home Cleaning')" class="p-3 border rounded-lg hover:bg-indigo-50 font-semibold">🧹 Broom</button>
+        <button onclick="selectCategory('ELECTRIC', 'Electrical Work')" class="p-3 border rounded-lg hover:bg-indigo-50 font-semibold">⚡ Electric</button>
+      </div>
+      <div>
+        <label class="block text-sm font-bold mb-1">Job Description (or use Voice Input)</label>
+        <div class="flex gap-2">
+          <input id="jobTitle" type="text" placeholder="e.g., Fix leaking kitchen tap" class="w-full border p-2 rounded-lg text-black" />
+          <button onclick="startVoiceInput()" class="bg-emerald-600 text-white px-3 py-2 rounded-lg font-bold">🎤 Speak</button>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="block text-sm font-bold mb-1">Your Proposed Budget (₹/£)</label>
+          <input id="jobBudget" type="number" value="350" class="w-full border p-2 rounded-lg text-black" />
+        </div>
+        <div>
+          <label class="block text-sm font-bold mb-1">Your Name</label>
+          <input id="userName" type="text" value="Martha (Senior)" class="w-full border p-2 rounded-lg text-black" />
+        </div>
+      </div>
+      <label class="flex items-center gap-2 text-sm font-semibold">
+        <input id="isPromoted" type="checkbox" class="w-4 h-4" /> Pin as Urgent Promoted Listing (+Micro-Fee)
+      </label>
+      <button onclick="createJob()" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-lg hover:bg-indigo-700">
+        ➕ Post Job with My Price
+      </button>
+    </section>
+
+    <section class="bg-white card p-5 rounded-xl shadow space-y-4">
+      <h2 class="text-xl font-bold border-b pb-2">2. Live Negotiation Room (Bargaining)</h2>
+      <div id="jobsList" class="space-y-4 max-h-[540px] overflow-y-auto"></div>
+    </section>
+
+    <section class="bg-white card p-5 rounded-xl shadow space-y-4">
+      <h2 class="text-xl font-bold border-b pb-2">3. Escrow Vault & Master Admin</h2>
+      <div id="escrowList" class="space-y-3 max-h-[540px] overflow-y-auto"></div>
+    </section>
+  </main>
+
+  <script>
+    let selectedIcon = 'WRENCH';
+    const socket = io({ path: '/socket.io' });
+    socket.on('job:updated', () => { loadJobs(); loadEscrow(); });
+
+    function selectCategory(icon, label) {
+      selectedIcon = icon;
+      document.getElementById('jobTitle').value = label + ': ';
+      document.getElementById('jobTitle').focus();
+    }
+
+    function speakGuide() {
+      const msg = new SpeechSynthesisUtterance(
+        "Welcome to Plan Ahead. Step 1: Pick an icon and propose your own budget. Step 2: Bargain directly with verified local workers. Step 3: Click Accept and Hold Funds in Escrow. Your money is only released after the worker uploads before and after photos."
+      );
+      window.speechSynthesis.speak(msg);
+    }
+
+    function toggleContrast() {
+      document.getElementById('appBody').classList.toggle('high-contrast');
+    }
+
+    function triggerSOS() {
+      alert('🚨 EMERGENCY SOS TRIGGERED: Live GPS coordinates and masked call logs dispatched to Local Authorities and Plan Ahead Safety Team.');
+    }
+
+    function startVoiceInput() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) return alert('Speech recognition supported in Chrome/Edge.');
+      const recognition = new SpeechRecognition();
+      recognition.onresult = (e) => {
+        document.getElementById('jobTitle').value = e.results[0][0].transcript;
+      };
+      recognition.start();
+    }
+
+    async function createJob() {
+      const title = document.getElementById('jobTitle').value || 'General Home Repair';
+      const userBudget = document.getElementById('jobBudget').value;
+      const userName = document.getElementById('userName').value;
+      const isPromoted = document.getElementById('isPromoted').checked;
+
+      await fetch('/api/negotiation/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, categoryIcon: selectedIcon, userName, userBudget, isPromoted })
+      });
+      loadJobs();
+    }
+
+    async function submitCounterOffer(jobId, role) {
+      const input = document.getElementById(`counter_${jobId}`);
+      const proposedAmount = input.value;
+      if (!proposedAmount) return;
+      const sender = role === 'WORKER' ? 'Raju (Verified Gold Worker)' : 'Martha (User)';
+      await fetch(`/api/negotiation/jobs/${jobId}/bargain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sender, role, proposedAmount, note: `${role} counter-offer` })
+      });
+      loadJobs();
+    }
+
+    async function lockEscrow(jobId, userName, amount) {
+      await fetch('/api/escrow/lock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, userName, workerName: 'Raju (Verified Gold Worker)', agreedAmount: amount })
+      });
+      await fetch(`/api/negotiation/jobs/${jobId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'ESCROW_LOCKED' })
+      });
+      loadJobs();
+      loadEscrow();
+    }
+
+    async function uploadProof(jobId) {
+      await fetch(`/api/escrow/proof/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          beforePhoto: 's3://proof-bucket/before_' + jobId + '.jpg',
+          afterPhoto: 's3://proof-bucket/after_' + jobId + '.jpg'
+        })
+      });
+      loadEscrow();
+    }
+
+    async function releaseFunds(jobId, expressPayout) {
+      await fetch(`/api/escrow/release/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expressPayout })
+      });
+      await fetch(`/api/negotiation/jobs/${jobId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'COMPLETED' })
+      });
+      loadJobs();
+      loadEscrow();
+    }
+
+    async function loadJobs() {
+      const res = await fetch('/api/negotiation/jobs');
+      const jobs = await res.json();
+      const container = document.getElementById('jobsList');
+      container.innerHTML = jobs.map(job => `
+        <div class="border rounded-xl p-4 space-y-2 ${job.isPromoted ? 'border-amber-500 bg-amber-50/40' : ''}">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-lg">${job.isPromoted ? '📌 PROMOTED: ' : ''}${job.title}</span>
+            <span class="text-xs px-2 py-1 rounded bg-indigo-100 text-indigo-900 font-bold">${job.status}</span>
+          </div>
+          <p class="text-sm">Initial Budget: <b>${job.userBudget}</b> | Current Bargain Offer: <b class="text-emerald-700 text-lg">${job.currentOffer}</b> (${job.lastBidder})</p>
+          <div class="bg-slate-100 p-2 rounded text-xs space-y-1 max-h-24 overflow-y-auto text-black">
+            ${(job.bids || []).map(b => `<div>• <b>${b.sender}:</b> ${b.amount}</div>`).join('')}
+          </div>
+          ${job.status !== 'ESCROW_LOCKED' && job.status !== 'COMPLETED' ? `
+            <div class="flex gap-2 pt-2">
+              <input id="counter_${job._id}" type="number" placeholder="Counter price" class="border p-1.5 rounded w-1/3 text-black" />
+              <button onclick="submitCounterOffer('${job._id}', 'WORKER')" class="bg-amber-600 text-white px-2 py-1.5 rounded text-xs font-bold">Worker Bid</button>
+              <button onclick="submitCounterOffer('${job._id}', 'USER')" class="bg-slate-700 text-white px-2 py-1.5 rounded text-xs font-bold">User Counter</button>
+            </div>
+            <button onclick="lockEscrow('${job._id}', '${job.userName}', ${job.currentOffer})" class="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold mt-2">
+              🔒 Accept Offer (${job.currentOffer}) & Lock Funds in Escrow
+            </button>
+          ` : ''}
+        </div>
+      `).join('');
+    }
+
+    async function loadEscrow() {
+      const res = await fetch('/api/escrow/ledgers');
+      const ledgers = await res.json();
+      const container = document.getElementById('escrowList');
+      if (ledgers.length === 0) {
+        container.innerHTML = '<p class="text-sm text-slate-500">No active escrow locks yet. Accept a bargain offer to lock funds.</p>';
+        return;
+      }
+      container.innerHTML = ledgers.map(l => `
+        <div class="border rounded-xl p-3 space-y-2">
+          <div class="flex justify-between">
+            <span class="font-bold text-sm">Job #${l.job_id.slice(-6)}</span>
+            <span class="text-xs font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900">${l.status}</span>
+          </div>
+          <p class="text-xs">Agreed: <b>${l.agreed_amount}</b> | Flat Fee: <b>${l.flat_platform_fee}</b> | Express Fee: <b>${l.express_fee}</b> | Net Worker Payout: <b>${l.worker_payout}</b></p>
+          ${l.status === 'HELD_IN_ESCROW' ? `
+            <button onclick="uploadProof('${l.job_id}')" class="w-full bg-blue-600 text-white py-1.5 rounded font-bold text-xs">
+              📸 Worker: Upload Before & After Proof Photos
+            </button>
+          ` : ''}
+          ${l.status === 'PROOF_SUBMITTED' ? `
+            <div class="text-xs text-emerald-700 font-semibold">✅ Before/After Photos Verified in Volume</div>
+            <div class="flex gap-2">
+              <button onclick="releaseFunds('${l.job_id}', false)" class="w-1/2 bg-emerald-700 text-white py-1.5 rounded font-bold text-xs">Release Standard</button>
+              <button onclick="releaseFunds('${l.job_id}', true)" class="w-1/2 bg-purple-700 text-white py-1.5 rounded font-bold text-xs">⚡ Instant Payout (-2%)</button>
+            </div>
+          ` : ''}
+        </div>
+      `).join('');
+    }
+
+    loadJobs();
+    loadEscrow();
+  </script>
+</body>
+</html>

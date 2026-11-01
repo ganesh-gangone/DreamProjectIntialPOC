@@ -1,0 +1,122 @@
+name: plan-ahead-microservices
+
+services:
+  postgres-db:
+    image: postgres:16.8-alpine3.21
+    container_name: pa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: planahead
+      POSTGRES_PASSWORD: planahead_secure_pwd
+      POSTGRES_DB: planahead_ledger
+    volumes:
+      - pg_escrow_data:/var/lib/postgresql/data
+      - ./db-init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U planahead -d planahead_ledger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-db:
+    image: mongo:7.0.16-jammy
+    container_name: pa-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_negotiation_data:/data/db
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-cache:
+    image: redis:7.4.2-alpine3.21
+    container_name: pa-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_state_data:/data
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  identity-service:
+    build: ./identity-service
+    container_name: pa-identity-svc
+    restart: unless-stopped
+    environment:
+      PORT: 4001
+      DATABASE_URL: postgresql://planahead:planahead_secure_pwd@postgres-db:5432/planahead_ledger
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    networks:
+      - backend_net
+
+  negotiation-service:
+    build: ./negotiation-service
+    container_name: pa-negotiation-svc
+    restart: unless-stopped
+    environment:
+      PORT: 4002
+      MONGO_URL: mongodb://mongo-db:27017
+      REDIS_URL: redis://redis-cache:6379
+    depends_on:
+      mongo-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    networks:
+      - backend_net
+
+  escrow-service:
+    build: ./escrow-service
+    container_name: pa-escrow-svc
+    restart: unless-stopped
+    environment:
+      PORT: 4003
+      DATABASE_URL: postgresql://planahead:planahead_secure_pwd@postgres-db:5432/planahead_ledger
+      PROOF_STORAGE_DIR: /app/proof_media
+    volumes:
+      - proof_media_data:/app/proof_media
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    networks:
+      - backend_net
+
+  frontend-gateway:
+    build: ./frontend-gateway
+    container_name: pa-frontend-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - identity-service
+      - negotiation-service
+      - escrow-service
+    networks:
+      - backend_net
+
+networks:
+  backend_net:
+    driver: bridge
+
+volumes:
+  pg_escrow_data:
+    driver: local
+  mongo_negotiation_data:
+    driver: local
+  redis_state_data:
+    driver: local
+  proof_media_data:
+    driver: local
