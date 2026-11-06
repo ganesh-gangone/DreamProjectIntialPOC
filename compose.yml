@@ -1,4 +1,4 @@
-name: plan-ahead-microservices
+version: "3.8"
 
 services:
   postgres-db:
